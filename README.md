@@ -1,9 +1,8 @@
 # SecurityCopilot-XDR-IncidentInvestigation
-このレポジトリは Defender XDR インシデント作成時に、Security Copilot を用いて調査するテンプレートを紹介しています
-
+>このレポジトリは Defender XDR インシデント作成時に、Security Copilot を用いて調査するテンプレートを紹介しています
 
 # 目的
- Security Copilot 活用推進: Defender XDR/Sentinel インシデント検知時のレポート生成
+> Security Copilot 活用推進: Defender XDR/Sentinel インシデント検知時のレポート生成
 
 事前送付ファイル：
  Azure Resource Manager テンプレートファイル 2点
@@ -13,7 +12,6 @@
 
 - SecurityCopilot-Sentinel-IncidentInvestigation.json 
  ※ Microsoft Sentinel インシデント専用
- ※ 貴社 Sentinel 分析ルール向け
 
 # 必要となる権限
 　ロジックアプリのリソース作成になるため、リソースグループの所有者権限で実施して下さい。
