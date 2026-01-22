@@ -10,6 +10,15 @@
 - SecurityCopilot-Sentinel-IncidentInvestigation.json 
  ※ Microsoft Sentinel インシデント専用
 
+# メール通知例
+
+<img width="1018" height="738" alt="image" src="https://github.com/user-attachments/assets/93d28bba-ec46-4679-9f3d-497f2f2de32b" /><BR>
+<img width="1018" height="618" alt="image" src="https://github.com/user-attachments/assets/db25668e-1929-45a5-9510-650147dce379" /><BR>
+<img width="1017" height="610" alt="image" src="https://github.com/user-attachments/assets/5a88c2f6-e4f4-40ed-91ff-5d23708f7d0c" /><BR>
+
+# ワークフロー図
+<img width="1517" height="786" alt="image" src="https://github.com/user-attachments/assets/dd572592-8d58-4f43-ad24-62bfce7c5ad4" />
+
 # 必要となる権限
 　ロジックアプリのリソース作成になるため、リソースグループの所有者権限で実施して下さい。
 　ロジックアプリより、Security Copilot を利用可能なユーザーでの承認が必要になりますのでご用意ください。
