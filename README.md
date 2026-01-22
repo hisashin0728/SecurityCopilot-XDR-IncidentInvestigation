@@ -4,9 +4,6 @@
 # 目的
 > Security Copilot 活用推進: Defender XDR/Sentinel インシデント検知時のレポート生成
 
-事前送付ファイル：
- Azure Resource Manager テンプレートファイル 2点
-
 - SecurityCopilot-XDR-IncidentInvestigation
  ※ Defender XDR にて統合して検知したインシデント専用
 
