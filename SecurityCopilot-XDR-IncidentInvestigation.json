@@ -1,0 +1,542 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "SecurityCopilot-XDR-Incident-Investigation-UnifiedSupportJP",
+        "description": "This playbook will notify Email by Azure Communication Service triggered by Sentinel Incident.",
+        "lastUpdateTime": "2025-02-19T00:00:00.000Z",
+        "tags": [ "Security" ],
+        "author": {
+            "name": "Hisashi Nakada"
+        }
+    },
+    "parameters": {
+        "PlaybookName":  {
+            "defaultValue":  "SecurityCopilot-XDR-Incident-Investigation",
+            "type":  "string"
+        },
+        "SendToEmailAddress": {
+            "defaultValue": "<username>@<domain>",
+            "type": "string"
+        }
+    },
+    "variables": {
+        "MicrosoftSentinelConnectionName":  "[concat('MicrosoftSentinel-', parameters('PlaybookName'))]",
+        "SecuritycopilotConnectionName":  "[concat('Securitycopilot-', parameters('PlaybookName'))]",
+        "AcsemailConnectionName":  "[concat('Acsemail-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "LogicAppsCategory": "security"
+            },
+            "dependsOn":  [
+                "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('SecuritycopilotConnectionName'))]",
+                "[resourceId('Microsoft.Web/connections', variables('AcsemailConnectionName'))]"
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Microsoft_Sentinel_incident": {
+                            "type": "ApiConnectionWebhook",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "body": {
+                                    "callback_url": "@{listCallbackUrl()}"
+                                },
+                                "path": "/incident-creation"
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Compose_Incident_Entities": {
+                            "runAfter": {},
+                            "type": "Compose",
+                            "inputs": "@triggerBody()?['object']?['properties']?['relatedEntities']"
+                        },
+                        "Condition_-_Validate_Entities": {
+                            "actions": {
+                                "For_Each_Entity": {
+                                    "foreach": "@outputs('Compose_Incident_Entities')",
+                                    "actions": {
+                                        "Switch": {
+                                            "cases": {
+                                                "Case_-_Ip_Address": {
+                                                    "case": "Ip",
+                                                    "actions": {
+                                                        "CheckEntitiesPrivateIP": {
+                                                            "actions": {},
+                                                            "else": {
+                                                                "actions": {
+                                                                    "Security_Copilot_prompt_for_MDTI": {
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "post",
+                                                                            "body": {
+                                                                                "PromptContent": "What are the reputation scores for the IPv4 addresses about @{items('For_Each_Entity')?['properties']?['address']} from Microsoft Defender Threat Intelligence? Can you look that up for me for the last 3 days?"
+                                                                            },
+                                                                            "path": "/process-prompt"
+                                                                        }
+                                                                    },
+                                                                    "Compose_MDTI_IP_Analysis": {
+                                                                        "runAfter": {
+                                                                            "Security_Copilot_prompt_for_MDTI": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        },
+                                                                        "type": "Compose",
+                                                                        "inputs": "@body('Security_Copilot_prompt_for_MDTI')?['EvaluationResultContent']"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "expression": {
+                                                                "or": [
+                                                                    {
+                                                                        "startsWith": [
+                                                                            " @{items('For_Each_Entity')?['properties']?['address']}",
+                                                                            "10."
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "startsWith": [
+                                                                            " @{items('For_Each_Entity')?['properties']?['address']}",
+                                                                            "172.16."
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "startsWith": [
+                                                                            " @{items('For_Each_Entity')?['properties']?['address']}",
+                                                                            "192.168."
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "type": "If"
+                                                        }
+                                                    }
+                                                },
+                                                "Case_-_Account": {
+                                                    "case": "Account",
+                                                    "actions": {
+                                                        "Security_Copilot_prompt_for_Account_": {
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": {
+                                                                    "PromptContent": "Give me all usr details for @{items('For_Each_Entity')?['properties']?['accountName']}. Does @{items('For_Each_Entity')?['properties']?['accountName']}have any registered devices in Microsoft Entra? List the recent risky sign-ins for @{items('For_Each_Entity')?['properties']?['accountName']}. Get Microsoft Entra audit logs for @{items('For_Each_Entity')?['properties']?['accountName']} for the past 72 hours.",
+                                                                    "SkillName": "GetEntraUserDetails"
+                                                                },
+                                                                "path": "/process-prompt"
+                                                            }
+                                                        },
+                                                        "Compose_Account_Analysis": {
+                                                            "runAfter": {
+                                                                "Security_Copilot_prompt_for_Account_": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Compose",
+                                                            "inputs": "@body('Security_Copilot_prompt_for_Account_')?['EvaluationResultContent']"
+                                                        }
+                                                    }
+                                                },
+                                                "Case_-_Host": {
+                                                    "case": "Host",
+                                                    "actions": {
+                                                        "Security_Copilot_prompt_for_Device": {
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": {
+                                                                    "PromptContent": "Tell me about device @{items('For_Each_Entity')?['properties']?['hostName']}.",
+                                                                    "SkillName": "GetIntuneDevices"
+                                                                },
+                                                                "path": "/process-prompt"
+                                                            }
+                                                        },
+                                                        "Compose_Device_Analysis": {
+                                                            "runAfter": {
+                                                                "Security_Copilot_prompt_for_Device": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Compose",
+                                                            "inputs": "@body('Security_Copilot_prompt_for_Device')?['EvaluationResultContent']"
+                                                        }
+                                                    }
+                                                },
+                                                "Case_-_Process": {
+                                                    "case": "Process",
+                                                    "actions": {
+                                                        "Security_Copilot_prompt_for_Process": {
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": {
+                                                                    "PromptContent": "Tell me more about the process command line: @{items('For_Each_Entity')?['properties']?['commandLine']}",
+                                                                    "SkillName": "ScriptAnalyzer"
+                                                                },
+                                                                "path": "/process-prompt"
+                                                            }
+                                                        },
+                                                        "Compose_Process_Analysis": {
+                                                            "runAfter": {
+                                                                "Security_Copilot_prompt_for_Process": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Compose",
+                                                            "inputs": "@body('Security_Copilot_prompt_for_Process')?['EvaluationResultContent']"
+                                                        }
+                                                    }
+                                                },
+                                                "Case_-_URL": {
+                                                    "case": "Url",
+                                                    "actions": {
+                                                        "Security_Copilot_prompt_for_Url": {
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "body": {
+                                                                    "PromptContent": "Please report URL @{items('For_Each_Entity')?['properties']?['url']} from Microsoft Defender Threat Intelligence."
+                                                                },
+                                                                "path": "/process-prompt"
+                                                            }
+                                                        },
+                                                        "Compose_Process_Url": {
+                                                            "runAfter": {
+                                                                "Security_Copilot_prompt_for_Url": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Compose",
+                                                            "inputs": "@body('Security_Copilot_prompt_for_Url')?['EvaluationResultContent']"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "default": {
+                                                "actions": {}
+                                            },
+                                            "expression": "@items('For_Each_Entity')?['kind']",
+                                            "type": "Switch"
+                                        }
+                                    },
+                                    "type": "Foreach"
+                                }
+                            },
+                            "runAfter": {
+                                "Compose_Incident_Entities": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "else": {
+                                "actions": {
+                                    "No_Entities_Found_-_Cancel_Execution": {
+                                        "type": "Terminate",
+                                        "inputs": {
+                                            "runStatus": "Cancelled"
+                                        }
+                                    }
+                                }
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "greater": [
+                                            "@length(outputs('Compose_Incident_Entities'))",
+                                            0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "Compose_-_Incident_Data": {
+                            "runAfter": {
+                                "Condition_-_Validate_Entities": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "Ip Address Analysis: @{outputs('Compose_MDTI_IP_Analysis')},\nAccount Analysis: @{outputs('Compose_Account_Analysis')},\nDevice Analysis: @{outputs('Compose_Device_Analysis')},\nProcess Analysis: @{outputs('Compose_Process_Analysis')},\nURL Analysis: @{outputs('Compose_Process_Url')}"
+                        },
+                        "Security_Copilot_perform_incident_investigation": {
+                            "runAfter": {
+                                "Convert_HTML_format-IncidentReport": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "PromptContent": "Here is the security incident detail: @{outputs('Compose_-_Incident_Data')}\n\nPerform investigation on security incident in following order. Analysis on Ip Address, Account, URL, Host and Process, Possible mitigation steps and Conclusion.",
+                                    "SkillName": "SummarizeData"
+                                },
+                                "path": "/process-prompt"
+                            }
+                        },
+                        "Add_Investigation_Notes_to_Incident": {
+                            "runAfter": {
+                                "Add_Copilot_Logo": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                    "message": "<p class=\"editor-paragraph\">@{body('ConvertHTMLformat-Entities')?['EvaluationResultContent']}</p><br>"
+                                },
+                                "path": "/Incidents/Comment"
+                            }
+                        },
+                        "Send_email": {
+                            "runAfter": {
+                                "Add_Copilot_Logo": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['acsemail']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "senderAddress": "",
+                                    "recipients": {
+                                        "to": [
+                                            {
+                                                "address": "[parameters('SendToEmailAddress')]"
+                                            }
+                                        ]
+                                    },
+                                    "content": {
+                                        "subject": "Defender XDR インシデント分析結果",
+                                        "html": "<p class=\"editor-paragraph\">@{variables('Add Copilot Logo')}</p><p class=\"editor-paragraph\">@{body('Convert_HTML_format-IncidentReport')?['EvaluationResultContent']}</p><p class=\"editor-paragraph\">@{body('ConvertHTMLformat-Entities')?['EvaluationResultContent']}</p>"
+                                    },
+                                    "importance": "Normal"
+                                },
+                                "path": "/emails:sendGAVersion",
+                                "queries": {
+                                    "api-version": "2023-03-31"
+                                }
+                            }
+                        },
+                        "ConvertHTMLformat-Entities": {
+                            "runAfter": {
+                                "Security_Copilot_perform_incident_investigation": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "PromptContent": "/AskGpt Provide the previous Response in optimized professional HTML format in Japanese",
+                                    "SessionId": "@body('Security_Copilot_perform_incident_investigation')?['sessionId']"
+                                },
+                                "path": "/process-prompt"
+                            }
+                        },
+                        "Add_Copilot_Logo": {
+                            "runAfter": {
+                                "ConvertHTMLformat-Entities": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Add Copilot Logo",
+                                        "type": "string",
+                                        "value": "<img src=\"https://raw.githubusercontent.com/Azure/Copilot-For-Security/main/Images/ic_fluent_copilot_64_64%402x.png\" alt=\"Copilot Logo\"/>"
+                                    }
+                                ]
+                            }
+                        },
+                        "Generate_XDR_Incident_Report": {
+                            "runAfter": {
+                                "Compose_-_Incident_Data": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "PromptContent": "Generate an incident Report about Microsoft Defender XDR ID:@{triggerBody()?['object']?['properties']?['providerIncidentId']}"
+                                },
+                                "path": "/process-prompt"
+                            }
+                        },
+                        "Convert_HTML_format-IncidentReport": {
+                            "runAfter": {
+                                "Generate_XDR_Incident_Report": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['securitycopilot_1']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "PromptContent": "/AskGpt Provide the previous Response in optimized professional HTML format in Japanese",
+                                    "SessionId": "@body('Generate_XDR_Incident_Report')?['sessionId']"
+                                },
+                                "path": "/process-prompt"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azuresentinel": {
+                                "id":  "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]",
+                                "connectionId":  "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                                "connectionName":  "[variables('MicrosoftSentinelConnectionName')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            },
+                            "securitycopilot_1": {
+                                "connectionId":  "[resourceId('Microsoft.Web/connections', variables('SecuritycopilotConnectionName'))]",
+                                "connectionName":  "[variables('SecuritycopilotConnectionName')]",
+                                "id":  "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Securitycopilot')]"
+                            },
+                            "acsemail": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('acsemailConnectionName'))]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/acsemail')]",
+                                "connectionName": "[variables('AcsemailConnectionName')]"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type":  "Microsoft.Web/connections",
+            "apiVersion":  "2016-06-01",
+            "name":  "[variables('MicrosoftSentinelConnectionName')]",
+            "location":  "[resourceGroup().location]",
+            "kind":  "V1",
+            "properties":  {
+                "displayName":  "[variables('MicrosoftSentinelConnectionName')]",
+                "customParameterValues":  {
+                },
+                "parameterValueType":  "Alternative",
+                "api":  {
+                    "id":  "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type":  "Microsoft.Web/connections",
+            "apiVersion":  "2016-06-01",
+            "name":  "[variables('SecuritycopilotConnectionName')]",
+            "location":  "[resourceGroup().location]",
+            "kind":  "V1",
+            "properties":  {
+                "displayName":  "[variables('SecuritycopilotConnectionName')]",
+                "customParameterValues":  {
+                },
+                "api":  {
+                    "id":  "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Securitycopilot')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('acsemailConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "displayName": "[parameters('PlayBookName')]",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/acsemail')]"
+                }
+            }
+        }
+    ]
+}
